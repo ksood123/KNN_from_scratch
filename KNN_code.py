@@ -1,137 +1,166 @@
-# k-nearest neighbors on the Iris Flowers Dataset
-from random import seed
-from random import randrange
-from csv import reader
-from math import sqrt
+import pandas as pd
+import numpy as np
+import math, random, collections
+import matplotlib.pyplot as plt
 
-# Load a CSV file
-def load_csv(filename):
-	dataset = list()
-	with open(filename, 'r') as file:
-		csv_reader = reader(file)
-		for row in csv_reader:
-			if not row:
-				continue
-			dataset.append(row)
-	return dataset
+def createMissingValue(df,l,j): # This function creates missing values in a column specified by 'j' and returns the dataframe sod created
+    df1=df.iloc[:,:]
+    for i in l:
+        df1.iloc[i,j]=math.nan
+    return df1
 
-# Convert string column to float
-def str_column_to_float(dataset, column):
-	for row in dataset:
-		row[column] = float(row[column].strip())
 
-# Convert string column to integer
-def str_column_to_int(dataset, column):
-	class_values = [row[column] for row in dataset]
-	unique = set(class_values)
-	lookup = dict()
-	for i, value in enumerate(unique):
-		lookup[value] = i
-	for row in dataset:
-		row[column] = lookup[row[column]]
-	return lookup
+def create_Train_Test_DataFrame(df,j,n_cols,l): # This function creates appropriate training and testing data frames by removing relevant rows and columns
+    if(j==0):
+        df_train=df.iloc[:,1:]
+        df_test=df_train.drop(df_train.index[l]).reset_index(drop=True)
+        return df_train,df_test
+    elif(j==(n_cols-1)):
+        df_train=df.iloc[:,:j]
+        df_test=df_train.drop(df_train.index[l]).reset_index(drop=True)
+        return df_train,df_test
+    else:
+        df1=df.iloc[:,:j]
+        df2=df.iloc[:,j+1:]
+        df_train=pd.concat([df1,df2],axis=1)
+        df_test=df_train.drop(df_train.index[l]).reset_index(drop=True)
+        return df_train,df_test
 
-# Find the min and max values for each column
-def dataset_minmax(dataset):
-	minmax = list()
-	for i in range(len(dataset[0])):
-		col_values = [row[i] for row in dataset]
-		value_min = min(col_values)
-		value_max = max(col_values)
-		minmax.append([value_min, value_max])
-	return minmax
+def Euclidean_distance(X,y,n): # It calculates Euclidean distance between two points
+    dist=0
+    for i in range(n):
+        dist+=np.square((X[i])-y[i])
+    return np.sqrt(dist)
 
-# Rescale dataset columns to the range 0-1
-def normalize_dataset(dataset, minmax):
-	for row in dataset:
-		for i in range(len(row)):
-			row[i] = (row[i] - minmax[i][0]) / (minmax[i][1] - minmax[i][0])
+def distancesum(X,n): # This returns the sum of distance of one axis
+    X.sort()
+    res=0 ; sum=0;
+    for i in range(n):
+        res+=(X[i]*i-sum) ; sum+=X[i]
+    return res
 
-# Split a dataset into k folds
-def cross_validation_split(dataset, n_folds):
-	dataset_split = list()
-	dataset_copy = list(dataset)
-	fold_size = int(len(dataset) / n_folds)
-	for _ in range(n_folds):
-		fold = list()
-		while len(fold) < fold_size:
-			index = randrange(len(dataset_copy))
-			fold.append(dataset_copy.pop(index))
-		dataset_split.append(fold)
-	return dataset_split
+def Manhattan_distance(X,y,n): # It calculates Manhattan distance
+    return distancesum(X,n)+distancesum(y,n)
 
-# Calculate accuracy percentage
-def accuracy_metric(actual, predicted):
-	correct = 0
-	for i in range(len(actual)):
-		if actual[i] == predicted[i]:
-			correct += 1
-	return correct / float(len(actual)) * 100.0
 
-# Evaluate an algorithm using a cross validation split
-def evaluate_algorithm(dataset, algorithm, n_folds, *args):
-	folds = cross_validation_split(dataset, n_folds)
-	scores = list()
-	for fold in folds:
-		train_set = list(folds)
-		train_set.remove(fold)
-		train_set = sum(train_set, [])
-		test_set = list()
-		for row in fold:
-			row_copy = list(row)
-			test_set.append(row_copy)
-			row_copy[-1] = None
-		predicted = algorithm(train_set, test_set, *args)
-		actual = [row[-1] for row in fold]
-		accuracy = accuracy_metric(actual, predicted)
-		scores.append(accuracy)
-	return scores
+def model_prediction(df_t,testing_instance,k,str1,flag=False): # This makes predictions by calculating either type of distance- Manhattan or Euclidean
+    distances=[] ; targets=[]
+    length=df_t.shape[1]
+    if(str1=='Euclidean'): # calculates Euclidean distance
+        for i in range(df_t.shape[0]):
+            distances.append([Euclidean_distance(list(df_t.iloc[i,:]),testing_instance,length),i])
+    else:
+        for i in range(df_t.shape[0]): # calculates Manhattan distance
+            distances.append([Manhattan_distance(list(df_t.iloc[i,:]),testing_instance,length),i])
 
-# Calculate the Euclidean distance between two vectors
-def euclidean_distance(row1, row2):
-	distance = 0.0
-	for i in range(len(row1)-1):
-		distance += (row1[i] - row2[i])**2
-	return sqrt(distance)
+    if(flag): # If it is true, then the algorithm becomes Weighted KNN
+        sum=0
+        for i in range(len(distances)):
+            if(distances[i][0]==0):
+                distances[i][0]=0
+            else:
+                distances[i][0]=1/distances[i][0]
+            sum+=distances[i][0]
+        for i in range(len(distances)):
+            distances[i][0]=distances[i][0]/sum
+    distances=sorted(distances) # sorts distance according to distance value
+    for i in range(k):
+        index=distances[i][1]
+        targets.append(index)
+    return collections.Counter(targets).most_common(1)[0][0] # returns the maximum voted instance
 
-# Locate the most similar neighbors
-def get_neighbors(train, test_row, num_neighbors):
-	distances = list()
-	for train_row in train:
-		dist = euclidean_distance(test_row, train_row)
-		distances.append((train_row, dist))
-	distances.sort(key=lambda tup: tup[1])
-	neighbors = list()
-	for i in range(num_neighbors):
-		neighbors.append(distances[i][0])
-	return neighbors
+def knn(df_train,df_test,k,str1,flag=False): # str1 tells distance method to be used and flag tells whether it is KNN or weighted KNN
+    neighbors=[]
+    for i in range(df_test.shape[0]):
+        testing_instance=list(df_test.iloc[i,:])
+        if(flag): # for weighted KNN
+            neighbors.append(model_prediction(df_train, testing_instance, k, str1,True))
+        else: # for normal KNN
+            neighbors.append(model_prediction(df_train, testing_instance, k, str1))
+    return neighbors # returns instance numbers which are most near to the  testing instances
 
-# Make a prediction with neighbors
-def predict_classification(train, test_row, num_neighbors):
-	neighbors = get_neighbors(train, test_row, num_neighbors)
-	output_values = [row[-1] for row in neighbors]
-	prediction = max(set(output_values), key=output_values.count)
-	return prediction
 
-# kNN Algorithm
-def k_nearest_neighbors(train, test, num_neighbors):
-	predictions = list()
-	for row in test:
-		output = predict_classification(train, row, num_neighbors)
-		predictions.append(output)
-	return(predictions)
 
-# Test the kNN on the Iris Flowers dataset
-seed(1)
-filename = 'iris.csv'
-dataset = load_csv(filename)
-for i in range(len(dataset[0])-1):
-	str_column_to_float(dataset, i)
-# convert class column to integers
-str_column_to_int(dataset, len(dataset[0])-1)
-# evaluate algorithm
-n_folds = 5
-num_neighbors = 5
-scores = evaluate_algorithm(dataset, k_nearest_neighbors, n_folds, num_neighbors)
-print('Scores: %s' % scores)
-print('Mean Accuracy: %.3f%%' % (sum(scores)/float(len(scores))))
+df=pd.read_csv(r'C:\Users\SAT SAHIB\Documents\Lakehead\Big Data\Assignment-1\Answers\Loading Data\encoded_data.csv') # loads csv file into Data Frame
+n_rows=df.shape[0] ; n_cols=df.shape[1]
+mean_1=int(np.mean(list(df['Height (cms)'])))
+mean_2=int(np.mean(list(df['Weight (kgs)'])))
+mean_3=0
+x=5
+accuracy=[]
+for i in range(3):
+    random.seed((i+1)*11) # seed value is changed depending so that new random numbers are generated each time
+    l=random.sample(range(0, n_rows-1), x) # list of row indices that  are to be randomly imputed
+    for j in range(3):
+        df1=createMissingValue(df,l,j) # data frame containing missing values
+        print('The missing values in column '+str(j+1)+' are as follows:')
+        print(df1[df1.index.isin(l)])
+        df_train,df_test=create_Train_Test_DataFrame(df1,j,n_cols,l) # creates training and testing data frames
+        #print(df_train.head())
+        neighborsE1=knn(df_train,df_test,1,'Euclidean') # 1-NN with Euclidean distance
+        neighborsE5=knn(df_train,df_test,5,'Euclidean') # 5-NN with Euclidean distance
+        neighborsM1=knn(df_train,df_test,1,'Manhattan') # 1-NN with Manhattan distance
+        neighborsM5=knn(df_train,df_test,5,'Manhattan') # 5-NN with Manhattan distance
+        neighborsWE=knn(df_train,df_test,5,'Euclidean',True) # Weighted 5-NN with Euclidean distance
+        neighborsWM=knn(df_train,df_test,5,'Manhattan',True) # Weighted 5-NN with Manhattan distance
+        #print((neighborsE1))
+
+        for k in range(len(l)): #imputed values to according to 1-NN Euclidean
+                df1.iloc[l[k],j]=df1.iloc[neighborsE1[k],j]
+
+        accuracy.append(np.sum([df.iloc[z,j]==df1.iloc[z,j] for z in l])/len(l))
+        print('The imputed values in column '+str(j+1)+' using 1-NN and Euclidean distance are:')
+        print(df1[df1.index.isin(l)])
+        for k in range(len(l)): # Imputes values according to 5-NN Euclidean
+                df1.iloc[l[k],j]=df1.iloc[neighborsE5[k],j]
+
+        accuracy.append(np.sum([df.iloc[z,j]==df1.iloc[z,j] for z in l])/len(l))
+        print('The imputed values in column '+str(j+1)+' using 5-NN and Euclidean distance are:')
+        print(df1[df1.index.isin(l)])
+        for k in range(len(l)): # Imputes values according to 1-NN Manhattan
+                df1.iloc[l[k],j]=df1.iloc[neighborsM1[k],j]
+
+        accuracy.append(np.sum([df.iloc[z,j]==df1.iloc[z,j] for z in l])/len(l))
+        print('The imputed values in column '+str(j+1)+' using 1-NN and Manhattan distance are:')
+        print(df1[df1.index.isin(l)])
+        for k in range(len(l)): # Imputes values according to 5-NN Manhattan
+                df1.iloc[l[k],j]=df1.iloc[neighborsM5[k],j]
+
+        accuracy.append(np.sum([df.iloc[z,j]==df1.iloc[z,j] for z in l])/len(l))
+        print('The imputed values in column '+str(j+1)+' using 5-NN and Manhattan distance are:')
+        print(df1[df1.index.isin(l)])
+        for k in range(len(l)): # Imputes values according to Weighted KNN using Euclidean distance
+                df1.iloc[l[k],j]=df1.iloc[neighborsWE[k],j]
+
+        accuracy.append(np.sum([df.iloc[z,j]==df1.iloc[z,j] for z in l])/len(l))
+        print('The imputed values in column '+str(j+1)+' using weighted 5-NN and Euclidean distance are:')
+        print(df1[df1.index.isin(l)])
+        for k in range(len(l)): # Imputes values according to Weighted KNN using Manhattan distance
+                df1.iloc[l[k],j]=df1.iloc[neighborsWM[k],j]
+
+        accuracy.append(np.sum([df.iloc[z,j]==df1.iloc[z,j] for z in l])/len(l))
+        print('The imputed values in column '+str(j+1)+' using weighted 5-NN and Manhattan distance are:')
+        print(df1[df1.index.isin(l)])
+    x=2*x
+data=[accuracy[i:i + 6] for i in range(0, len(accuracy), 6)] # creates data frame for different accuracy measures
+col_names=['E1','E5','M1','M5','WE','WM']
+data_frame=pd.DataFrame(data=data,columns=col_names)
+column_imputation=['Col1_5','Col2_5','Col3_5','Col1_10','Col2_10','Col3_10','Col1_20','Col2_20','Col3_20']
+data_frame['Column with Imputation%']=column_imputation
+print(data_frame.head())
+# Selecting the accuracy measures of continuous features
+df1=data_frame.iloc[:2,:]
+df2=data_frame.iloc[3:5,:]
+df3=data_frame.iloc[6:8,:]
+df_continuous=df1.append([df2,df3],ignore_index=True)
+print(df_continuous.head())
+# Selecting the accuracy measures of categorical features
+s1=data_frame.iloc[2,:]
+s2=data_frame.iloc[5,:] ; s3=data_frame.iloc[8,:]
+df_combined=pd.DataFrame()
+df_categorical=df_combined.append([s1,s2,s3],ignore_index=True)
+print(df_categorical.head())
+results_continous=df_continuous.to_csv(r'C:\Users\SAT SAHIB\Documents\Lakehead\Big Data\Question1\results_continuous.csv',index=None)
+results_categorical=df_categorical.to_csv(r'C:\Users\SAT SAHIB\Documents\Lakehead\Big Data\Question1\results_categorical.csv',index=None)
+accuracy_csv=data_frame.to_csv(r'C:\Users\SAT SAHIB\Documents\Lakehead\Big Data\Question1\accuracy_csv.csv',index=None)
+data_frame.plot() ; plt.show()
